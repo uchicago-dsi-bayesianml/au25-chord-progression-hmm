@@ -1,377 +1,140 @@
-# Bayesian & Neural Approaches for Chord Generation Tasks in Pop Music
-This project aims to explore how different modeling paradigms — Bayesian models and neural sequence models — capture musical structure in pop music.
-We evaluate two categories of tasks:
-### Task A — Harmonic Structure Modeling (Bayesian Models)
-- Modeling chord progressions using interpretable statistical frameworks (HMM, HDP-HMM, HDP-HSMM), focusing on functional harmony, mode, and explicit duration modeling.
-### Task B — Melody → Piano Accompaniment Generation (Neural Models)
-- Predicting full piano accompaniment (128-dim piano roll) from melody bars using LSTM encoder-decoder models. This task is significantly more complex and high-dimensional, making it unsuitable for traditional Bayesian models, so we tried to solve it with Neural Models.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/banner-dark.png">
+  <img alt="The University of Chicago, MS in Applied Data Science. ADSP 32014 course project." src=".github/assets/banner-light.png">
+</picture>
 
-#### Why We Use Two Tasks？
-Our original goal was to **generate full piano accompaniment from melody tracks**.
+# Bayesian and Neural Approaches for Chord Generation in Pop Music
 
-However, we found that accompaniment pianorolls are **extremely high-dimensional** (128-dim multi-label states), making them **unsuitable for Bayesian models** such as HMM / HDP-HMM. The state space becomes too large to learn stable transition probabilities.
+> **Example project from Autumn 2025.** This is a copy of [Michellexpeng/Bayesian-Project](https://github.com/Michellexpeng/Bayesian-Project), shown with the authors' work and commit history intact. Their own write-up is [REPORT.md](REPORT.md). Course staff wrote this README and made the edits listed under [Changes by course staff](#changes-by-course-staff), including the section on [what to learn from this project](#what-to-learn-from-this-project).
 
-To keep the Bayesian part meaningful, we redesigned that task to **20-class functional chord prediction**, which fits the assumptions of probabilistic models and allows interpretable harmonic structure learning.
+How much of a pop song's chord progression can a model predict from the chords before it, and does it help to know the key, to reduce chords to their harmonic function, or to let hidden states and durations into the model? The team answered this on POP909, a corpus of 909 pop songs with beat-aligned chord and key annotations, with four probabilistic models, and separately trained an LSTM to generate piano accompaniment from a melody.
 
-At the same time, we preserved the **original accompaniment-generation task** for the LSTM model, since neural sequence-to-sequence models are capable of handling high-dimensional polyphonic outputs.
+## Summary
 
-Thus our final project consists of:
-- Bayesian Models → functional harmony modeling
+Chords are first aligned to beats and transposed, then reduced from 193 absolute chord symbols to 20 functional labels, Roman-numeral degrees relative to the song's key. Four models predict the next chord: a Markov chain over absolute chords, a Markov chain over functional chords with separate transition matrices for major and minor keys, and two latent-state models fit by Gibbs sampling, a Bayesian HMM with a key-aware prior and a variant that models how long each hidden state lasts. The functional, mode-conditioned chain cuts test perplexity from 11.4 to 5.0 and raises next-chord accuracy from 34 to 42 percent. The latent-state models reach 46 and 48 percent accuracy on their own test split. All four generate chord progressions as MIDI. A second, separate task trains an encoder-decoder LSTM to produce a bar of piano accompaniment from the melody and the preceding bars, and writes the results to MIDI.
 
-- LSTM Model → full pianoroll accompaniment generation
+## Team and contributions
 
-This setup lets each modeling approach operate where it is most effective, while still addressing the broader theme of learning musical structure.
+Team "Regularize This!", Autumn 2025.
 
-Below we first present the full results of Task A (Bayesian models), followed by Task B (LSTM accompaniment generation), which extends the project into a more challenging generative scenario.
+- **Michelle Peng** ([@Michellexpeng](https://github.com/Michellexpeng)): the POP909 parser, chord preprocessing and functional-harmony features, the baseline and mode-conditional Markov chains, the evaluation and comparison scripts, the MIDI generation, the EDA and visualization notebooks.
+- **Luna Lu** ([@uchilunalu](https://github.com/uchilunalu)): the Bayesian HMM and the duration-modeling variant, their Gibbs samplers, training, evaluation and generation scripts.
+- **Wen Yao** ([@weckiness0807](https://github.com/weckiness0807)): the LSTM accompaniment model, its data pipeline and MIDI export, the LSTM section of the write-up, and the write-up's final assembly.
 
-# Task A: Bayesian Chord Progression Modeling
+The project ran from November 11 to December 10, 2025. The attributions above follow the [commit history](https://github.com/uchicago-dsi-bayesianml/au25-chord-progression-hmm/commits/main).
 
-A Bayesian approach to modeling chord progressions in pop music using Hidden Markov Models (HMM) with functional harmony and mode-conditional modeling.
+## Getting started
 
-## Overview
-
-This project implements and compares two HMM-based approaches for chord progression modeling:
-1. **Baseline Model**: Absolute chord representation (193 unique chords)
-2. **Conditional Model**: Functional harmony with mode conditioning (20 functional chords)
-3. **HDP-HMM**: Bayesian Nonparametric HMM with infinite state space and key-aware priors.
-4. **HDP-HSMM**: Hierarchical Dirichlet Process Hidden Semi-Markov Model with explicit duration modeling.
-
-**Key Results:**
-- Conditional model achieves **56.6% perplexity reduction** over baseline (4.96 vs 11.44)
-- **41.82% prediction accuracy** (+23.0% improvement over baseline)
-- **89.6% vocabulary reduction** through functional chord representation (193 → 20 chords)
-- HDP-HSMM outperforms HDP-HMM in both perplexity (8.75 vs 9.11) and accuracy (48.08% vs 46.16%), demonstrating the value of explicit duration modeling for musical structure.
-- Functional Harmony reduces vocabulary size by 89.6% (193 $\to$ 20 chords), enabling more robust learning.
-
-## Dataset
-- **POP909**: 909 pop songs with melody-chord-piano alignment ([GitHub](https://github.com/music-x-lab/POP909-Dataset))
-- **Split**: 70% train (636 songs) / 15% validation (136 songs) / 15% test (137 songs)
-- **Features**: Beat-aligned chord annotations, key signatures, mode labels
-
-## Models
-
-### Baseline HMM (`hmm_baseline.pkl`)
-- Absolute chord representation (C, C#m, D7, etc.)
-- 193 unique chords after C/Am transposition
-- Trained on 636 songs (70% of dataset)
-- Test perplexity: 11.44
-- Test accuracy: 33.99%
-
-### Conditional HMM (`hmm_conditional.pkl`) 
-- Functional harmony (Roman numerals: I, IV, V, vi, etc.)
-- Mode-conditional: P(chord | previous_chord, mode) where mode ∈ {major, minor}
-- 20 functional chords (7 major + 7 minor diatonic + 5 chromatic + 1 special)
-- Test perplexity: 4.96 (56.6% improvement over baseline)
-- Test accuracy: 41.82% (23.0% improvement over baseline)
-- Handles chromatic chords: bII (Neapolitan), bVII (subtonic), #IV, etc.
-
-### HDP-HMM (`hdp_hmm.pkl`)
-- Type: Hierarchical Dirichlet Process HMM
-- Features: Functional harmony + Key-Aware Priors
-- Mechanism: Automatically infers the number of hidden harmonic states (infinite state space).
-- Performance: Perplexity 9.11, Accuracy 46.16%
-
-### HDP-HSMM (`hdp_hsmm.pkl`) ⭐ Highest Accuracy
-- Type: HDP Hidden Semi-Markov Model
-- Features: Functional harmony + Key-Aware Priors + Explicit Duration Modeling
-- Mechanism: Models state duration explicitly (e.g., how long a chord lasts), solving the "rapid switching" problem of standard HMMs.
-- Performance: Perplexity 8.75, Accuracy 48.08%
-
-## Project Structure
-```
-.
-├── data/
-│   ├── POP909/              # POP909 dataset root
-├── models/
-│   ├── hmm_baseline.pkl
-│   ├── hmm_conditional.pkl
-│   ├── hdp_hmm.pkl          # HDP-HMM model
-│   └── hdp_hsmm.pkl         # HDP-HSMM model
-├── generated_music/         # Output folder for MIDI files
-├── scripts/
-│   ├── train_baseline.py
-│   ├── train_conditional.py
-│   ├── train_hdp_hmm.py     # Train HDP-HMM
-│   ├── train_hdp_hsmm.py    # Train HDP-HSMM
-│   ├── test_baseline.py
-│   ├── test_conditional.py
-│   ├── test_hdp_hmm.py      # Test HDP-HMM
-│   ├── test_hdp_hsmm.py     # Test HDP-HSMM
-│   ├── compare_models.py    # Compare Baseline vs Conditional
-│   └── compare_hdp_models.py # Compare HDP-HMM vs HDP-HSMM
-├── music_generation/        # Generation scripts
-│   ├── generate_hdp_hmm_simple.py
-│   ├── generate_hdp_hmm_full.py
-│   ├── generate_hdp_hsmm_simple.py
-│   └── generate_hdp_hsmm_full.py
-├── src/
-│   ├── data/                # Data processing modules
-│   └── models/              # Core model classes
-│       ├── hdp_hmm.py       # HDP-HMM implementation
-│       └── hdp_hsmm.py      # HDP-HSMM implementation
-└── README.md
-```
-
-
-
-## Quick Start
-
-### 1. Setup Environment
-```bash
-python3 -m venv .venv
-source .venv/bin/activate  # macOS/Linux
-# or .venv\Scripts\activate on Windows
+```sh
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+git clone https://github.com/music-x-lab/POP909-Dataset.git /tmp/pop909 && mkdir -p data && cp -r /tmp/pop909/POP909 data/POP909
 ```
 
-### 2. Download Dataset
-Download POP909 dataset and place it in `data/POP909/`
+Train and evaluate the two Markov chains, then compare them:
 
-### 3. Train Models
-
-**Train baseline model:**
-```bash
+```sh
 python scripts/train_baseline.py --pop909 data/POP909 --out models/hmm_baseline.pkl
-```
-
-**Train conditional model:**
-```bash
 python scripts/train_conditional.py --pop909 data/POP909 --out models/hmm_conditional.pkl
-```
-
-Add `--limit 20` for quick testing on 20 songs.
-
-**Train HDP-HMM:**
-```bash
-python scripts/train_hdp_hmm.py
-```
-
-**Train HDP-HSMM:**
-```bash
-python scripts/train_hdp_hsmm.py
-```
-
-### 4. Evaluate Models
-
-**Test baseline:**
-```bash
 python scripts/test_baseline.py --model models/hmm_baseline.pkl --pop909 data/POP909
-```
-
-**Test conditional model:**
-```bash
 python scripts/test_conditional.py --model models/hmm_conditional.pkl --pop909 data/POP909
-```
-
-**Compare Baseline and Conditional models:**
-```bash
 python scripts/compare_models.py
 ```
 
-** Compare HDP-HMM and HDP-HSMM:**
-```bash
-python scripts/compare_hdp_models.py --pop909 data/POP909
+Train and evaluate the latent-state models, which take a few minutes each:
+
+```sh
+python scripts/train_hdp_hmm.py
+python scripts/train_hdp_hsmm.py
+python scripts/compare_hdp.py --pop909 data/POP909
 ```
 
-### 5. Generate Music 🎵 NEW!
-Use your trained model to generate new chord progressions and convert them to playable MIDI:
+Generate a chord progression and open it in any MIDI player:
 
-**Quick test (generates test song):**
-```bash
-python music_generation/quick_test.py
+```sh
+python music_generation/generate_full_music.py --model models/hmm_conditional.pkl --mode major --bars 8 --output generated_music/song.mid
 ```
 
-**Generate full music with melody and bass (e.g. conditional):**
-```bash
-python music_generation/generate_full_music.py \
-    --model models/hmm_conditional.pkl \
-    --mode major \
-    --bars 8 \
-    --output generated_music/my_song.mid
-```
+Trained models are included in `models/`, so generation works without training. The LSTM lives in `LSTM/LSTM.ipynb`, written for Google Colab with a GPU and the dataset on Google Drive; its preprocessing cells convert POP909 MIDI files to bar-level piano rolls. The guides `MODEL_TRAINING_GUIDE.md` and `music_generation/MUSIC_GENERATION_GUIDE.md` have more options.
 
-**Generate simple chord progression (e.g. conditional):**
-```bash
-python music_generation/generate_music.py \
-    --model models/hmm_conditional.pkl \
-    --mode major \
-    --length 32 \
-    --output generated_music/chords.mid
-```
+## Data
 
-**Play the generated MIDI:**
-- Open `.mid` file in GarageBand (macOS)
-- Use QuickTime Player: `open generated_music/my_song.mid`
-- Upload to online MIDI player
+Data files are never committed to this repository. Git ignores `data/`.
 
-📖 **See [`music_generation/`](music_generation/) folder for detailed instructions!**
+- **Source:** [POP909](https://github.com/music-x-lab/POP909-Dataset), Wang et al., ISMIR 2020: 909 Chinese pop songs as MIDI with aligned melody, bridge and piano tracks, beat positions, key and chord annotations.
+- **Terms:** MIT license.
+- **How to get it:** clone the dataset repository as shown above.
+- **Where to put it:** `data/POP909/`, one numbered folder per song.
 
-### 6. Visualize Results
-Open `notebooks/Model_Visualization.ipynb` to visualize:
-- Model performance comparison
-- Transition probability heatmaps
-- Chord distribution analysis
-- Mode-specific patterns
+The EDA notebook also looks at a Kaggle collection of classical piano MIDI files, which the proposal planned as a second corpus. It isn't used by any model.
 
-## Results Summary
+## Project structure
 
-See detailed reports:
-- [`validation_results/BASELINE_SUMMARY.md`](validation_results/BASELINE_SUMMARY.md) - Baseline model analysis
-- [`validation_results/CONDITIONAL_SUMMARY.md`](validation_results/CONDITIONAL_SUMMARY.md) - Conditional model analysis ⭐
+| Path | Contents |
+|---|---|
+| `REPORT.md` | The authors' write-up: both tasks, models, results, challenges, future work. |
+| `src/data/` | POP909 parser, chord normalization and transposition, Roman-numeral features, the dataset class with the key-aware prior. |
+| `src/models/hdp_hmm.py`, `hdp_hsmm.py` | The two latent-state models and their Gibbs samplers. |
+| `scripts/` | Training, testing and comparison scripts for all four models. |
+| `models/` | The four trained models as pickles. |
+| `music_generation/` | Chord-progression and full-arrangement MIDI generation, with guides. |
+| `notebooks/` | EDA of POP909 and the classical set, and the figures: transition heatmaps, vocabulary, perplexity comparisons. |
+| `validation_results/` | Detailed reports on the two Markov chains. |
+| `LSTM/` | The accompaniment notebook and ten generated MIDI files, five of them with humanized timing. |
+| `Bayesian Conditional Harmonization on Symbolic Music.docx` | The project proposal. |
 
-**Key Findings:**
-- Functional harmony dramatically reduces vocabulary (193 → 20 chords, 89.6% reduction)
-- Mode-conditional modeling captures major/minor differences in progression patterns
-- 56.6% perplexity improvement (11.44 → 4.96)
-- 23.0% accuracy improvement (33.99% → 41.82%, +1755 correct predictions)
-- Chromatic chords (bII, bVII) are frequent in pop music and handled correctly
-- Prediction errors are musically coherent (functionally similar substitutions)
+## Method
 
-## Technical Details
+**Representation.** Chord annotations are sampled at each beat. For the baseline, chords are transposed to C major or A minor and keep their quality, giving 193 symbols. For the other models, each chord becomes a scale degree relative to the song's key, with the mode kept as a separate variable. That gives 20 labels: the seven major-key degrees, four minor-key degrees, eight chromatic degrees that fall outside the scale, and "no chord".
 
-**Modeling Approach:**
-- 1st-order Markov model: P(chord_t | chord_{t-1}, mode)
-- Add-one smoothing for unseen transitions
-- Key transposition to C major / A minor for data pooling
-- Functional chord extraction using scale degree analysis
+**Markov chains.** The baseline is a first-order chain over the 193 symbols with add-one smoothing. The conditional model is the same chain over the 20 functional labels with one transition matrix for major keys and one for minor. Both are fit by counting. Prediction is the most likely next chord given the previous one.
 
-**Evaluation Metrics:**
-- **Perplexity**: Measures model uncertainty (lower = better)
-- **Prediction Accuracy**: Next-chord prediction correctness
-- **Vocabulary Coverage**: Percentage of chords in test data seen during training
+**Latent-state models.** Both have 24 hidden states, a categorical emission distribution per state over 425 labels, scale degree combined with the full chord quality and inversion, Dirichlet priors on transitions and emissions, and a key-aware prior that adds pseudo-counts to dominant-to-tonic and subdominant-to-dominant transitions. They are fit with 50 sweeps of Gibbs sampling: forward-filtering backward-sampling for the state sequences, conjugate Dirichlet draws for the parameters. The first model is a standard HMM. The second separates the transition matrix between distinct states from how long a state persists, puts a Gamma prior on each state's mean duration, and samples Poisson durations when generating. Evaluation uses the forward algorithm, so next-chord prediction comes from the filtered belief over hidden states, not from the last state alone.
 
-## Future Work
-- 2nd-order Markov models (bigram → trigram)
-- Melody conditioning: P(chord | previous_chord, melody, mode)
-- Rhythm and duration modeling
+**LSTM.** An encoder LSTM reads the melody and piano of the preceding bars; a decoder LSTM produces the current bar's piano roll step by step from the melody and its own previous output, with teacher forcing in training. Binary cross-entropy with positive weighting handles the sparse 128-pitch targets, and a threshold plus top-k selection controls density at generation time. The notebook also tries a small Transformer.
 
-# Task B: Melody → Piano Accompaniment Generation (LSTM Model)
+### What is Bayesian here
 
-This task aims to generate piano accompaniment directly from melody tracks, using an LSTM auto-regressive decoder architecture. Unlike Task A (Bayesian chord modeling), Task B attempts to model full 128-dimensional polyphonic pianoroll, making it a high-dimensional, multi-label sequence prediction problem.
-
-## Dataset Processing
-We use the POP909 dataset, which contains aligned melody, bridge, and piano tracks for 909 pop songs.
-Because raw MIDI event timing is inconsistent and difficult for neural networks to learn directly, we convert all tracks into a bar-level pianoroll representation:
-
-### Processing steps
-1. Frame Sampling (fs = 2)
-- Each beat is sampled into 2 frames (low temporal resolution to reduce model complexity).
-- Converts continuous MIDI events into a fixed-length frame sequence.
-
-2. Bar Split (steps_per_bar = 16)
-- Each bar contains 16 time steps.
-- Melody and accompaniment are reshaped into tensors of shape:
-  ```bash
-  [num_bars, 16, 128]
-  ```
-  where 128 is the pitch dimension.
-
-3. Train/Val/Test Split
-- We follow an 80/10/10 split based on songs.
-- The split is performed at the song level to prevent data leakage.
-
-4. Model Input / Output Format
-For each bar, the dataset provides:
-- mel_ctx: melody of previous N bars
-- piano_ctx: accompaniment of previous N bars
-- mel_bar: melody of the current bar
-- piano_bar: ground truth accompaniment of the current bar
-
-## Model Architecture
-
-We adopt a Bar-level Encoder–Decoder LSTM capable of generating a full bar of accompaniment conditioned on melody:
-
-### Encoder
-
-The encoder LSTM takes the concatenation of:
-- Melody context (ctx_bars × 16 × 128)
-- Piano context (ctx_bars × 16 × 128)
-
-Encoded using a multi-layer LSTM to obtain a hidden state summarizing the harmonic/melodic history. And it outputs hidden states (h, c).
-```bash
-enc_in = concat(mel_ctx, piano_ctx)
-_, (h, c) = encoder(enc_in)
-```
-
-### Decoder
-
-The decoder generates the accompaniment for the current bar step-by-step.
-At each timestep t: 
-```bash
-dec_in_t = concat(mel_bar[t], prev_piano)
-out, (h, c) = decoder(dec_in_t, (h, c))
-```
-mel_bar[t] is the melody at timestep t
-
-prev_piano is either
- - ground-truth (teacher forcing during training)
- - or previous prediction (during inference)
-
-The decoder uses the encoder’s (h, c) as initialization, so:
-The generated accompaniment is conditioned on both music history and the current bar’s melody.
-
-### Output Layer
-
-A linear projection maps LSTM outputs to a 128-dim pitch vector:
-logits → 128 probabilities (one per pitch)
-
-A sigmoid is applied later during inference; thresholding + top-K selection controls sparsity.
-
-### Loss function
-- Binary cross-entropy (BCE) over the 128 pitch outputs
-- Pos-weighting to handle sparsity of pianoroll
-This model directly predicts dense 16×128 accompaniment for each bar.
-
-
-
-## Key Challenges
-
-1) Sparsity of pianoroll
-
-Piano accompaniment contains few active notes per time step
-Without proper weighting, models tend to output overly low probabilities or trivial solutions
-
-Solve this by add loss to encourage the probability of some notes 
-
-2) Prediction collapse
-
-Some models collapse to repeating a single chord
-<img width="1438" height="798" alt="image" src="https://github.com/user-attachments/assets/ec0d3661-7d29-4c7e-81b2-c932737a3f66" />
-
-
-Solve this by tuning of: context size, loss weighting, sparsity penalty, decoding thresholds
-
+The two Markov chains are maximum-likelihood models with a smoothing prior; their value is in the representation, not the inference. The latent-state models are the Bayesian part. Every transition row and emission row has a Dirichlet prior, the key-aware pseudo-counts encode music theory as prior belief, and Gibbs sampling draws from the joint posterior over hidden state sequences and parameters, alternating a conjugate update for the parameters with an exact sample of the state path given them. That is the course's HMM material and its MCMC material in one model. The duration variant adds a Gamma-Poisson conjugate pair for how long a hidden state lasts. The LSTM is the non-Bayesian contrast: a point-estimate model that gives probabilities per pitch but no posterior over anything.
 
 ## Results
-Testing different threshold:
-0.5:
-<img width="1438" height="820" alt="image" src="https://github.com/user-attachments/assets/ce044a37-85f2-4e9f-a3b5-9d943d6780ac" />
-0.7:
-<img width="1398" height="802" alt="image" src="https://github.com/user-attachments/assets/22339542-d782-4a3e-b6c5-d0dbc7d5c5f5" />
-0.8
-<img width="1458" height="800" alt="image" src="https://github.com/user-attachments/assets/7e0a9788-91ba-4c7e-95df-a79c3dbb24a4" />
 
-Whole song(threshold=0.7):
-<img width="2560" height="1112" alt="image" src="https://github.com/user-attachments/assets/0d0dc20d-dff6-4ee2-8595-0a921dca00f6" />
+Reported by the authors on POP909 test songs. The first two rows share a random 70/15/15 split with seed 42; the last two use the first 70 percent of songs for training and the last 15 percent for testing, and a 425-label vocabulary. See the caveat below.
 
-Also, some sample generation can be see in the LSTM/midis.
+| Model | Test perplexity | Next-chord accuracy |
+|---|---|---|
+| Markov chain, 193 absolute chords | 11.44 | 34.0% |
+| Markov chain, 20 functional chords, by mode | 4.96 | 41.8% |
+| Bayesian HMM, 24 states, key-aware prior | 9.11 | 46.2% |
+| Same, with explicit durations | 8.75 | 48.1% |
 
+The functional, mode-conditioned chain is the clearest result: the representation halves perplexity. The authors' error analysis shows that its mistakes are mostly functionally similar substitutions. The transition heatmaps in `notebooks/Model_Visualization.ipynb` are readable music theory: strong I, IV, V and vi structure in major keys, i, iv, v and VI in minor.
 
-## Future Work
+The LSTM results are qualitative: piano-roll plots at different decoding thresholds and ten generated MIDI files. Early models collapsed to repeating one chord; context length, loss weighting and a sparsity penalty fixed that.
 
-### Explore more expressive sequence models
-Our current LSTM model captures local temporal patterns, but future work may investigate more powerful architectures (e.g., Transformer variants, diffusion models, or hierarchical RNNs) that can better model long-range harmonic structure and multi-voice interactions.
+## What to learn from this project
 
-### Combine LSTM with probabilistic models
-Because HMMs excel at capturing high-level harmonic transitions while LSTMs learn fine-grained temporal patterns, a hybrid system—e.g., HMM for chord-level structure + LSTM for frame-level realization—may leverage the strengths of both paradigms.
+Course staff added this section. The core work is sound and the code is the team's own. The points below are about naming things precisely and comparing fairly.
 
-### Modular modeling for different musical roles
-We are thinking about train separate models for chord progression, rhythmic patterns, and voice-leading, and then fuse the outputs. This may reduce complexity and improve controllability.
+- **Name the model you built.** The write-up calls the latent-state models "HDP-HMM" and "HDP-HSMM" and says they infer the number of states from an infinite state space. The code is a finite 24-state Bayesian HMM with Dirichlet priors. There is no hierarchical Dirichlet process. The duration variant uses geometric durations in inference, which makes it an HMM with a different parametrization, and only draws Poisson durations when generating. Both are good models and worth presenting as what they are.
+- **Compare on the same test set.** The two Markov chains and the two latent-state models use different splits and different vocabularies, so the four rows above aren't one comparison. Within each pair the comparison is fair. One split, fixed at the start, would have made the whole table meaningful, including the interesting question of whether hidden states beat an observed-state chain at all.
+- **Describe the vocabulary you have.** The report says the 20 labels are seven major, seven minor, five chromatic and one special, and that chromatic chords such as bII and bVII are handled. The labels in the trained conditional model are seven major degrees, four minor degrees, eight unnamed chromatic degrees written as question marks, and "no chord". The report also presents the latent-state models as working on the same functional harmony, but their pickled vocabularies hold 425 labels, scale degree with full quality and inversion, which is why their perplexities sit between the two chains rather than below them. A 48 percent next-chord accuracy over 425 labels is a stronger result than the table makes it look, and the write-up undersells it by not saying so.
+- **Say what changed since the proposal.** The proposal promised NumPyro or Pyro, calibrated uncertainty and listening tests. None appear, and the write-up doesn't say so. Scope changes are normal; the write-up should record them.
+- **Small things.** Two of the three GitHub accounts had no name set, the write-up names no authors, a citation block said "Your Name", four data files were two-byte placeholders, and the LSTM task is a different task from the chord models, so it is a second project rather than the neural baseline the title suggests.
 
-### Reverse-direction modeling: Piano → Melody
-Since accompaniment often contains richer polyphonic information (multiple notes per timestep) while melody is typically monophonic, the reverse task—predicting melody from piano accompaniment—may be easier for sequence models and could provide useful insights into the melodic structure present in accompaniment.
+What the project does well: a clean, modular codebase with reproducible scripts and a fixed seed; a representation decision, functional harmony by mode, that is motivated by music theory and validated by a large perplexity drop; a hand-written Gibbs sampler with forward-filtering backward-sampling that is correct; prediction from the filtered belief rather than a point estimate of the hidden state; interpretable outputs in the form of transition heatmaps and playable MIDI; and an honest account of what the neural model could and couldn't do.
 
+## About this project
 
+This project was built in Bayesian Machine Learning with Generative AI Applications (ADSP 32014), part of the Master of Science in Applied Data Science at the University of Chicago, in Autumn 2025. It is shown here as an example for later cohorts.
 
+## Changes by course staff
 
+Course staff forked the authors' repository and made these edits. The authors' code and notebooks are unchanged.
 
+- Renamed the authors' README to `REPORT.md`, unchanged, and added this README with the program banner.
+- Removed four two-byte placeholder files in `LSTM/DATA/` and an empty `Data_files/readme.md`, and removed a citation block with placeholder author text from `MODEL_TRAINING_GUIDE.md`.
+
+## License
+
+The authors have not added a license, so their code is shown here under GitHub's terms for public repositories. Ask them before reusing it.
