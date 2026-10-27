@@ -227,18 +227,6 @@ A: Use `--limit 100` to restrict number of training songs
 **Q: Cannot find model file?**
 A: Check if `models/` directory exists
 
-## 📚 Citation
-
-If you use this code, please cite:
-
-```bibtex
-@misc{pop909_hmm,
-  title={Hierarchical Bayesian Models for Chord Progression Analysis},
-  author={Your Name},
-  year={2025}
-}
-```
-
 ## 📞 Contact
 
 For questions or suggestions, please refer to:
